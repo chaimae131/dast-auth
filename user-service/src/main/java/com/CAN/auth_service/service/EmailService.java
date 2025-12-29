@@ -10,7 +10,7 @@ public class EmailService {
     private final JavaMailSender mailSender;
 
     public void sendVerificationEmail(String to, String token) {
-        String link = "http://localhost:8080/api/CAN/auth/verify?token=" + token;
+        String link = "http://localhost:8222/api/CAN/auth/verify?token=" + token;
         SimpleMailMessage message = new SimpleMailMessage();
         message.setTo(to);
         message.setSubject("Verify your email");

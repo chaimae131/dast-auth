@@ -1,0 +1,59 @@
+services:
+  postgres-db:
+    image: postgres:16
+    container_name: postgres-db-ci
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${DB_PASS} # Injected by Jenkins
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Cette ligne ajoute votre script d'initialisation :
+      - ./init-db:/docker-entrypoint-initdb.d 
+    networks:
+      - ci-network
+
+  auth-service:
+    image: ${IMAGE_NAME} # Injected by Jenkins
+    container_name: auth-service
+    ports:
+      - "8080:8080"
+    environment:
+      - EURIKA=http://discovery-service:8761/eureka 
+      - DB_USERNAME=postgres
+      - DB_URL=jdbc:postgresql://postgres-db:5432/authdb
+      - DB_PASSWORD=${DB_PASS}   # Injected by Jenkins
+      - EMAIL_AD=${EMAIL}
+      - EMAIL_PASS=${PASSWORD}
+      - JWT_SECRET=${JWT_SECRET} 
+    depends_on:
+      - postgres-db
+      - discovery-service
+    networks:
+      - ci-network
+
+  discovery-service:
+    image: khadijaelghozail/discovery-service:latest
+    container_name: discovery-service
+    ports:
+      - "8761:8761"
+    networks:
+      - ci-network
+
+  gateway-service:
+    image: khadijaelghozail/gateway-service:latest
+    container_name: gateway-service
+    ports:
+      - "8222:8222"
+    environment:
+      - EURIKA=http://discovery-service:8761/eureka
+    depends_on:
+      - discovery-service
+    networks:
+      - ci-network
+
+
+networks:
+  ci-network:
+    driver: bridge
