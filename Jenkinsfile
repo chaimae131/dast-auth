@@ -57,7 +57,8 @@ pipeline {
                 script {
                     sh 'mkdir -p zap-reports && chmod 777 zap-reports'
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
-
+                    
+                    // API Scan using OpenAPI/Swagger
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
@@ -66,35 +67,57 @@ pipeline {
                             owasp/zap2docker-stable zap-api-scan.py \
                             -t ${TARGET_URL}/v3/api-docs \
                             -f openapi \
-                            -r zap_report.html \
-                            -J zap_json_report.json \
-                            -z "-config api.disablekey=false" \
+                            -r zap_api_report.html \
+                            -J zap_api_report.json \
                             -d
+                        """
+                    }
+                    
+                    // Full DAST Scan (spider + active scan)
+                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                        sh """
+                        docker run --rm \
+                            --network=${networkName} \
+                            -v \$(pwd)/zap-reports:/zap/wrk/:rw \
+                            owasp/zap2docker-stable zap-full-scan.py \
+                            -t ${TARGET_URL} \
+                            -r zap_full_report.html \
+                            -J zap_full_report.json \
+                            -I
                         """
                     }
                 }
             }
         }
-    }
 
-    post {
-        always {
-            publishHTML(target: [
-                allowMissing: false,
-                alwaysLinkToLastBuild: true,
-                keepAll: true,
-                reportDir: 'zap-reports',
-                reportFiles: 'zap_report.html',
-                reportName: 'OWASP ZAP Report',
-                reportTitles: 'ZAP Security Scan'
-            ])
-            
-            script {
-                // Clean up containers and volumes
-                sh "docker-compose -p ${COMPOSE_PROJECT_NAME} -f ${COMPOSE_FILE} down -v"
-                // Remove the locally built image to save space
-                sh "docker rmi ${IMAGE_NAME} || true"
+        post {
+            always {
+                // Publish API Scan Report
+                publishHTML(target: [
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'zap-reports',
+                    reportFiles: 'zap_api_report.html',
+                    reportName: 'ZAP API Scan Report',
+                    reportTitles: 'API Security Scan'
+                ])
+                
+                // Publish Full DAST Report
+                publishHTML(target: [
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'zap-reports',
+                    reportFiles: 'zap_full_report.html',
+                    reportName: 'ZAP Full DAST Report',
+                    reportTitles: 'Full Security Scan'
+                ])
+                
+                script {
+                    sh "docker-compose -p ${COMPOSE_PROJECT_NAME} -f ${COMPOSE_FILE} down -v"
+                    sh "docker rmi ${IMAGE_NAME} || true"
+                }
             }
         }
     }
-}
