@@ -58,7 +58,7 @@ pipeline {
                     
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     // The new official ZAP image name
-                    def zapImage = "zaproxy/zaproxy:stable"
+                    def zapImage = "owasp/zap2docker-stable"
 
                     // 1. API Scan (Targets the OpenAPI definition)
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
