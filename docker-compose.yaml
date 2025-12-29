@@ -4,56 +4,74 @@ services:
     container_name: postgres-db-ci
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${DB_PASS} # Injected by Jenkins
+      - POSTGRES_PASSWORD=${DB_PASS}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Cette ligne ajoute votre script d'initialisation :
-      - ./init-db:/docker-entrypoint-initdb.d 
+      - ./init-db:/docker-entrypoint-initdb.d
     networks:
       - ci-network
-
-  auth-service:
-    image: ${IMAGE_NAME} # Injected by Jenkins
-    container_name: auth-service
-    ports:
-      - "8080:8080"
-    environment:
-      - EURIKA=http://discovery-service:8761/eureka 
-      - DB_USERNAME=postgres
-      - DB_URL=jdbc:postgresql://postgres-db:5432/authdb
-      - DB_PASSWORD=${DB_PASS}   # Injected by Jenkins
-      - EMAIL_AD=${EMAIL}
-      - EMAIL_PASS=${PASSWORD}
-      - JWT_SECRET=${JWT_SECRET} 
-    depends_on:
-      - postgres-db
-      - discovery-service
-    networks:
-      - ci-network
+    # ADDED: Healthcheck is required for 'up --wait' to work
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   discovery-service:
-    image: khadijaelghozail/discovery-service:latest
+    image: ${DISCOVERY_IMAGE}
     container_name: discovery-service
     ports:
       - "8761:8761"
     networks:
       - ci-network
+    # ADDED: Simple TCP check to ensure port is open
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8761/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   gateway-service:
-    image: khadijaelghozail/gateway-service:latest
+    image: ${GATEWAY_IMAGE}
     container_name: gateway-service
     ports:
       - "8222:8222"
     environment:
-      - EURIKA=http://discovery-service:8761/eureka
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
     depends_on:
-      - discovery-service
+      discovery-service:
+        condition: service_healthy # Wait for discovery
     networks:
       - ci-network
 
+  auth-service:
+    image: ${IMAGE_NAME}
+    container_name: auth-service
+    ports:
+      - "8080:8080"
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+      - DB_USERNAME=postgres
+      - DB_URL=jdbc:postgresql://postgres-db:5432/authdb
+      - DB_PASSWORD=${DB_PASS}
+      - JWT_SECRET=${JWT_SECRET}
+    depends_on:
+      postgres-db:
+        condition: service_healthy # Wait for DB to be ready
+      discovery-service:
+        condition: service_healthy
+    networks:
+      - ci-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 networks:
   ci-network:
     driver: bridge
+volumes:
+  postgres_data:
