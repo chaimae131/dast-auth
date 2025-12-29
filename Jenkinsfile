@@ -20,6 +20,8 @@ pipeline {
                 script {
                     sh "chmod -R +r ./init-db"
                     
+                    // Clean previous containers & volumes to avoid conflicts
+                    sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" down -v || true'
                     withCredentials([
                         string(credentialsId: 'discovery-image-id', variable: 'DISCOVERY_IMAGE'),
                         string(credentialsId: 'gateway-image-id', variable: 'GATEWAY_IMAGE'),
