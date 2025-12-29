@@ -68,7 +68,8 @@ pipeline {
                             -f openapi \
                             -r zap_report.html \
                             -J zap_json_report.json \
-                            -z "-config api.disable128=true" 
+                            -z "-config api.disablekey=false" \
+                            -d
                         """
                     }
                 }

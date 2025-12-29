@@ -59,19 +59,13 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - EMAIL_AD=${EMAIL_AD}
       - EMAIL_PASS=${EMAIL_PASS}
-    depends_on:
-    depends_on:
+    depends_on:  # Remove one of these
       postgres-db:
-        condition: service_healthy # Wait for DB to be ready
+        condition: service_healthy
       discovery-service:
         condition: service_healthy
     networks:
       - ci-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
 networks:
   ci-network:
