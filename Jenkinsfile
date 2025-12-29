@@ -54,18 +54,16 @@ pipeline {
             steps {
                 script {
                     sh 'mkdir -p zap-reports && chmod 777 zap-reports'
-                    
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
-                    
-                    // CORRECT IMAGE NAME BELOW
-                    def zapImage = "zaproxy/zaproxy:stable"
 
+                    // API Scan using OpenAPI
+                    echo "Starting ZAP API Scan..."
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
                             --network=${networkName} \
                             -v \$(pwd)/zap-reports:/zap/wrk/:rw \
-                            ${zapImage} zap-api-scan.py \
+                            owasp/zap2docker-stable zap-api-scan.py \
                             -t ${TARGET_URL}/v3/api-docs \
                             -f openapi \
                             -r zap_api_report.html \
@@ -73,12 +71,14 @@ pipeline {
                         """
                     }
                     
+                    // Full DAST Scan
+                    echo "Starting ZAP Full Scan..."
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
                             --network=${networkName} \
                             -v \$(pwd)/zap-reports:/zap/wrk/:rw \
-                            ${zapImage} zap-full-scan.py \
+                            owasp/zap2docker-stable zap-full-scan.py \
                             -t ${TARGET_URL} \
                             -r zap_full_report.html \
                             -J zap_full_report.json \
