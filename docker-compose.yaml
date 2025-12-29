@@ -57,6 +57,9 @@ services:
       - DB_URL=jdbc:postgresql://postgres-db:5432/authdb
       - DB_PASSWORD=${DB_PASS}
       - JWT_SECRET=${JWT_SECRET}
+      - EMAIL_AD=${EMAIL_AD}
+      - EMAIL_PASS=${EMAIL_PASS}
+    depends_on:
     depends_on:
       postgres-db:
         condition: service_healthy # Wait for DB to be ready

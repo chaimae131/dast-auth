@@ -2,57 +2,48 @@ pipeline {
     agent any
 
     environment {
-        // Built dynamically
         IMAGE_NAME = "my-auth-service:${BUILD_NUMBER}"
-        
-        // These 3 variables are defined in 'Manage Jenkins > System > Global Properties'
-        // They are NOT in GitHub.
-        // DISCOVERY_IMAGE, GATEWAY_IMAGE, REGISTRY_URL
-        
         TARGET_URL = "http://auth-service:8080"
         COMPOSE_PROJECT_NAME = "jenkins-dast-scan" 
         COMPOSE_FILE = "docker-compose.yaml"
+        // REGISTRY_URL is still used in the post-clean up if needed, 
+        // or can be removed if login isn't required at all.
     }
 
     stages {
-        stage('Build & Registry Login') {
+        stage('Build Image') {
             steps {
-                script {
-                    // Build local service
-                    sh "docker build -t ${IMAGE_NAME} ."
-                    
-                    // Use a Credentials ID for the registry login
-                    // 'my-registry-creds' is stored in Jenkins Credentials
-                    withCredentials([usernamePassword(credentialsId: 'my-registry-creds', 
-                                     usernameVariable: 'REG_USER', 
-                                     passwordVariable: 'REG_PASS')]) {
-                        sh "echo ${REG_PASS} | docker login ${REGISTRY_URL} -u ${REG_USER} --password-stdin"
-                        sh "docker pull ${DISCOVERY_IMAGE}"
-                        sh "docker pull ${GATEWAY_IMAGE}"
-                    }
-                }
+                // We only build the local service here
+                sh "docker build -t ${IMAGE_NAME} ."
             }
         }
 
         stage('Start Test Environment') {
             steps {
                 script {
+                    // Ensure init-db scripts are readable
+                    sh "chmod -R +r ./init-db"
+                    
                     withCredentials([
-                        usernamePassword(credentialsId: 'my-registry-creds', usernameVariable: 'REG_USER', passwordVariable: 'REG_PASS'),
-                        string(credentialsId: 'registry-url-id', variable: 'REGISTRY_URL'),
                         string(credentialsId: 'discovery-image-id', variable: 'DISCOVERY_IMAGE'),
                         string(credentialsId: 'gateway-image-id', variable: 'GATEWAY_IMAGE'),
                         string(credentialsId: 'auth-db-password', variable: 'DB_PASS'),
-                        string(credentialsId: 'auth-jwt-secret', variable: 'JWT_SECRET')
+                        string(credentialsId: 'auth-jwt-secret', variable: 'JWT_SECRET'),
+                        string(credentialsId: 'email-ad', variable: 'EMAIL_AD'),
+                        string(credentialsId: 'email-pass', variable: 'EMAIL_PASS')
                     ]) {
+                        // We pull the images without explicit login (assuming server is pre-authenticated)
+                        sh "docker pull ${DISCOVERY_IMAGE}"
+                        sh "docker pull ${GATEWAY_IMAGE}"
+
                         sh """
-                            echo ${REG_PASS} | docker login ${REGISTRY_URL} -u ${REG_USER} --password-stdin
-                            
                             export IMAGE_NAME=${IMAGE_NAME}
                             export DISCOVERY_IMAGE=${DISCOVERY_IMAGE}
                             export GATEWAY_IMAGE=${GATEWAY_IMAGE}
                             export DB_PASS=${DB_PASS}
                             export JWT_SECRET=${JWT_SECRET}
+                            export EMAIL_AD=${EMAIL_AD}
+                            export EMAIL_PASS=${EMAIL_PASS}
                             
                             docker-compose -p ${COMPOSE_PROJECT_NAME} -f ${COMPOSE_FILE} up -d --wait
                         """
@@ -98,8 +89,9 @@ pipeline {
             ])
             
             script {
+                // Clean up containers and volumes
                 sh "docker-compose -p ${COMPOSE_PROJECT_NAME} -f ${COMPOSE_FILE} down -v"
-                sh "docker logout ${REGISTRY_URL}"
+                // Remove the locally built image to save space
                 sh "docker rmi ${IMAGE_NAME} || true"
             }
         }
