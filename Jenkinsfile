@@ -6,22 +6,18 @@ pipeline {
         TARGET_URL = "http://auth-service:8080"
         COMPOSE_PROJECT_NAME = "jenkins-dast-scan" 
         COMPOSE_FILE = "docker-compose.yaml"
-        // REGISTRY_URL is still used in the post-clean up if needed, 
-        // or can be removed if login isn't required at all.
     }
 
     stages {
         stage('Build Image') {
             steps {
-                // We only build the local service here
-                sh "docker build -t ${IMAGE_NAME} ."
+                sh 'docker build -t "${IMAGE_NAME}" .'
             }
         }
 
         stage('Start Test Environment') {
             steps {
                 script {
-                    // Ensure init-db scripts are readable
                     sh "chmod -R +r ./init-db"
                     
                     withCredentials([
@@ -32,33 +28,33 @@ pipeline {
                         string(credentialsId: 'email-ad', variable: 'EMAIL_AD'),
                         string(credentialsId: 'email-pass', variable: 'EMAIL_PASS')
                     ]) {
-                        // We pull the images without explicit login (assuming server is pre-authenticated)
-                        sh "docker pull ${DISCOVERY_IMAGE}"
-                        sh "docker pull ${GATEWAY_IMAGE}"
+                        sh 'docker pull "${DISCOVERY_IMAGE}"'
+                        sh 'docker pull "${GATEWAY_IMAGE}"'
 
-                        sh """
-                            export IMAGE_NAME=${IMAGE_NAME}
-                            export DISCOVERY_IMAGE=${DISCOVERY_IMAGE}
-                            export GATEWAY_IMAGE=${GATEWAY_IMAGE}
-                            export DB_PASS=${DB_PASS}
-                            export JWT_SECRET=${JWT_SECRET}
-                            export EMAIL_AD=${EMAIL_AD}
-                            export EMAIL_PASS=${EMAIL_PASS}
+                        sh '''
+                            export IMAGE_NAME="${IMAGE_NAME}"
+                            export DISCOVERY_IMAGE="${DISCOVERY_IMAGE}"
+                            export GATEWAY_IMAGE="${GATEWAY_IMAGE}"
+                            export DB_PASS="${DB_PASS}"
+                            export JWT_SECRET="${JWT_SECRET}"
+                            export EMAIL_AD="${EMAIL_AD}"
+                            export EMAIL_PASS="${EMAIL_PASS}"
                             
-                            docker-compose -p ${COMPOSE_PROJECT_NAME} -f ${COMPOSE_FILE} up -d --wait
-                        """
+                            # Using 'docker compose' (space) for modern compatibility
+                            docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d --wait
+                        '''
                     }
                 }
             }
         }
 
-        stage('Run OWASP ZAP DAST Scan') {
+        stage('Run DAST Scans') {
             steps {
                 script {
                     sh 'mkdir -p zap-reports && chmod 777 zap-reports'
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     
-                    // API Scan using OpenAPI/Swagger
+                    // 1. API Scan (Targets the OpenAPI definition)
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
@@ -68,12 +64,12 @@ pipeline {
                             -t ${TARGET_URL}/v3/api-docs \
                             -f openapi \
                             -r zap_api_report.html \
-                            -J zap_api_report.json \
-                            -d
+                            -J zap_api_report.json
                         """
                     }
                     
-                    // Full DAST Scan (spider + active scan)
+                    // 2. Full Scan (Deep scan of the service endpoints)
+                    // Added -I to ignore web-crawling errors if it's just an API
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
@@ -89,35 +85,36 @@ pipeline {
                 }
             }
         }
+    } // End of Stages
 
-        post {
-            always {
-                // Publish API Scan Report
+    post {
+        always {
+            script {
+                // Ensure HTML Publisher plugin is installed
                 publishHTML(target: [
-                    allowMissing: false,
+                    allowMissing: true,
                     alwaysLinkToLastBuild: true,
                     keepAll: true,
                     reportDir: 'zap-reports',
                     reportFiles: 'zap_api_report.html',
-                    reportName: 'ZAP API Scan Report',
+                    reportName: 'ZAP API Report',
                     reportTitles: 'API Security Scan'
                 ])
                 
-                // Publish Full DAST Report
                 publishHTML(target: [
-                    allowMissing: false,
+                    allowMissing: true,
                     alwaysLinkToLastBuild: true,
                     keepAll: true,
                     reportDir: 'zap-reports',
                     reportFiles: 'zap_full_report.html',
-                    reportName: 'ZAP Full DAST Report',
-                    reportTitles: 'Full Security Scan'
+                    reportName: 'ZAP Full Report',
+                    reportTitles: 'Full DAST Scan'
                 ])
-                
-                script {
-                    sh "docker-compose -p ${COMPOSE_PROJECT_NAME} -f ${COMPOSE_FILE} down -v"
-                    sh "docker rmi ${IMAGE_NAME} || true"
-                }
+
+                // Teardown
+                sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" down -v'
+                sh 'docker rmi "${IMAGE_NAME}" || true'
             }
         }
     }
+}
