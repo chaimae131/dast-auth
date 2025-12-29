@@ -53,16 +53,20 @@ pipeline {
         stage('Run DAST Scans') {
             steps {
                 script {
+                    // Ensure the report directory exists and is writable by the ZAP container
                     sh 'mkdir -p zap-reports && chmod 777 zap-reports'
-                    def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     
+                    def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
+                    // The new official ZAP image name
+                    def zapImage = "zaproxy/zaproxy:stable"
+
                     // 1. API Scan (Targets the OpenAPI definition)
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
                             --network=${networkName} \
                             -v \$(pwd)/zap-reports:/zap/wrk/:rw \
-                            owasp/zap2docker-stable zap-api-scan.py \
+                            ${zapImage} zap-api-scan.py \
                             -t ${TARGET_URL}/v3/api-docs \
                             -f openapi \
                             -r zap_api_report.html \
@@ -71,13 +75,12 @@ pipeline {
                     }
                     
                     // 2. Full Scan (Deep scan of the service endpoints)
-                    // Added -I to ignore web-crawling errors if it's just an API
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
                             --network=${networkName} \
                             -v \$(pwd)/zap-reports:/zap/wrk/:rw \
-                            owasp/zap2docker-stable zap-full-scan.py \
+                            ${zapImage} zap-full-scan.py \
                             -t ${TARGET_URL} \
                             -r zap_full_report.html \
                             -J zap_full_report.json \
@@ -87,7 +90,6 @@ pipeline {
                 }
             }
         }
-    } // End of Stages
 
     post {
         always {
