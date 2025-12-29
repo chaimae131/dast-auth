@@ -53,14 +53,13 @@ pipeline {
         stage('Run DAST Scans') {
             steps {
                 script {
-                    // Ensure the report directory exists and is writable by the ZAP container
                     sh 'mkdir -p zap-reports && chmod 777 zap-reports'
                     
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
-                    // The new official ZAP image name
-                    def zapImage = "owasp/zap2docker-stable"
+                    
+                    // CORRECT IMAGE NAME BELOW
+                    def zapImage = "zaproxy/zaproxy:stable"
 
-                    // 1. API Scan (Targets the OpenAPI definition)
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
@@ -74,7 +73,6 @@ pipeline {
                         """
                     }
                     
-                    // 2. Full Scan (Deep scan of the service endpoints)
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
