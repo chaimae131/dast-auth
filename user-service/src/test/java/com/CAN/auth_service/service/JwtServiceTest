@@ -1,0 +1,170 @@
+package com.CAN.auth_service.service;
+
+import com.CAN.auth_service.dto.UpdateProfileRequest;
+import com.CAN.auth_service.dto.UserProfileDTO;
+import com.CAN.auth_service.entity.Role;
+import com.CAN.auth_service.entity.User;
+import com.CAN.auth_service.entity.VerificationToken;
+import com.CAN.auth_service.repository.UserRepository;
+import com.CAN.auth_service.repository.VerificationTokenRepository;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class) // Active Mockito pour cette classe
+class UserServiceTest {
+
+    @Mock // Simule le Repository (pas de vraie BDD)
+    private UserRepository userRepository;
+
+    @Mock
+    private VerificationTokenRepository tokenRepository;
+
+    @Mock // Simule l'encodeur de mot de passe
+    private PasswordEncoder passwordEncoder;
+
+    @InjectMocks // Injecte les mocks ci-dessus dans ton UserService
+    private UserService userService;
+
+    // --- TEST REGISTER ---
+
+    @Test
+    void registerUser_ShouldReturnToken_WhenEmailIsNew() {
+        // ARRANGE (Préparation)
+        String email = "test@test.com";
+        String password = "password123";
+
+        // On dit au mock : "Si on cherche cet email, retourne vide"
+        when(userRepository.findByEmail(email)).thenReturn(Optional.empty());
+        when(passwordEncoder.encode(password)).thenReturn("encodedPass");
+        // On simule la sauvegarde (retourne l'objet passé)
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArguments()[0]);
+        when(tokenRepository.save(any(VerificationToken.class))).thenAnswer(i -> i.getArguments()[0]);
+
+        // ACT (Action)
+        VerificationToken result = userService.registerUser("user1", email, password, Role.VISITOR);
+
+        // ASSERT (Vérification)
+        assertNotNull(result);
+        assertNotNull(result.getToken());
+        assertEquals(email, result.getUser().getEmail());
+        assertEquals("encodedPass", result.getUser().getPassword());
+
+        // Vérifie que la méthode save a bien été appelée 1 fois
+        verify(userRepository, times(1)).save(any(User.class));
+    }
+
+    @Test
+    void registerUser_ShouldThrowException_WhenEmailExists() {
+        // ARRANGE
+        String email = "exist@test.com";
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(new User()));
+
+        // ACT & ASSERT
+        RuntimeException exception = assertThrows(RuntimeException.class, () -> {
+            userService.registerUser("user1", email, "pass", Role.VISITOR);
+        });
+
+        assertEquals("Email déjà utilisé", exception.getMessage());
+        verify(userRepository, never()).save(any(User.class)); // On ne doit rien sauvegarder
+    }
+
+    // --- TEST AUTHENTICATE ---
+
+    @Test
+    void authenticate_ShouldReturnUser_WhenCredentialsAreValid() {
+        // ARRANGE
+        String email = "test@test.com";
+        String rawPass = "pass";
+        String encodedPass = "encoded";
+
+        User mockUser = User.builder()
+                .email(email)
+                .password(encodedPass)
+                .enabled(true) // Important car ton code vérifie isEnabled()
+                .build();
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(mockUser));
+        when(passwordEncoder.matches(rawPass, encodedPass)).thenReturn(true);
+
+        // ACT
+        User result = userService.authenticate(email, rawPass);
+
+        // ASSERT
+        assertNotNull(result);
+        assertEquals(email, result.getEmail());
+    }
+
+    @Test
+    void authenticate_ShouldReturnNull_WhenUserNotEnabled() {
+        // ARRANGE
+        String email = "test@test.com";
+        User mockUser = User.builder().email(email).enabled(false).build();
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(mockUser));
+
+        // ACT
+        User result = userService.authenticate(email, "pass");
+
+        // ASSERT
+        assertNull(result);
+    }
+
+    // --- TEST UPDATE PROFILE ---
+
+    @Test
+    void updateUserProfile_ShouldUpdateFields() {
+        // ARRANGE
+        String email = "test@test.com";
+        User existingUser = User.builder()
+                .id(1L)
+                .email(email)
+                .role(Role.VISITOR)
+                .fullName("Old Name")
+                .build();
+
+        UpdateProfileRequest request = new UpdateProfileRequest();
+        request.setFullName("New Name");
+        request.setCity("Paris");
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(existingUser));
+
+        // ACT
+        UserProfileDTO result = userService.updateUserProfile(email, request);
+
+        // ASSERT
+        assertEquals("New Name", result.getFullName());
+        assertEquals("Paris", result.getCity());
+        verify(userRepository, times(1)).save(existingUser);
+    }
+
+    // --- TEST DELETE USER ---
+
+    @Test
+    void deleteUser_ShouldDeleteTokenAndUser() {
+        // ARRANGE
+        Long userId = 1L;
+        User mockUser = User.builder().id(userId).build();
+        VerificationToken mockToken = VerificationToken.builder().user(mockUser).build();
+
+        when(userRepository.existsById(userId)).thenReturn(true);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(mockUser));
+        when(tokenRepository.findByUser(mockUser)).thenReturn(mockToken);
+
+        // ACT
+        userService.deleteUser(userId);
+
+        // ASSERT
+        verify(tokenRepository, times(1)).delete(mockToken);
+        verify(userRepository, times(1)).deleteById(userId);
+    }
+}
