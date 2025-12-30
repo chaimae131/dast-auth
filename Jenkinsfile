@@ -60,72 +60,130 @@ pipeline {
             }
         }
 
+        stage('Verify Service is Up') {
+            steps {
+                script {
+                    def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
+                    
+                    echo "Waiting for auth-service to be ready..."
+                    sh """
+                        # Wait up to 60 seconds for service to respond
+                        for i in {1..12}; do
+                            if docker run --rm --network=${networkName} curlimages/curl:latest \
+                                curl -s -o /dev/null -w "%{http_code}" http://auth-service:8080/actuator/health | grep -q "200"; then
+                                echo "✓ Auth service is ready!"
+                                exit 0
+                            fi
+                            echo "Waiting for service... (attempt \$i/12)"
+                            sleep 5
+                        done
+                        echo "✗ Service failed to start!"
+                        exit 1
+                    """
+                    
+                    // Verify OpenAPI docs are accessible
+                    echo "Checking OpenAPI docs..."
+                    sh """
+                        docker run --rm --network=${networkName} curlimages/curl:latest \
+                            curl -v http://auth-service:8080/v3/api-docs
+                    """
+                }
+            }
+        }
+
         stage('Run DAST Scans - Unauthenticated') {
             steps {
                 script {
                     def workspace = env.WORKSPACE
-                    sh "mkdir -p ${workspace}/zap-reports && chmod 777 ${workspace}/zap-reports"
+                    sh "rm -rf ${workspace}/zap-reports && mkdir -p ${workspace}/zap-reports && chmod 777 ${workspace}/zap-reports"
 
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     def zapImage   = "ghcr.io/zaproxy/zaproxy:stable"
 
                     // ================= API SCAN =================
                     echo "Starting ZAP API Scan..."
-                    sh """
+                    def apiScanStatus = sh(script: """
                         docker run --rm \
-                            --user \$(id -u):\$(id -g) \
                             --network=${networkName} \
                             -v ${workspace}/zap-reports:/zap/wrk/:rw \
                             ${zapImage} zap-api-scan.py \
                             -t http://auth-service:8080/v3/api-docs \
                             -f openapi \
-                            -O http://auth-service:8080 \
                             -r zap_api_report.html \
                             -J zap_api_report.json \
-                            -I || true
+                            -I
+                    """, returnStatus: true)
+                    
+                    echo "API Scan completed with status: ${apiScanStatus}"
+                    
+                    // Check if report was created
+                    sh """
+                        if [ -f "${workspace}/zap-reports/zap_api_report.html" ]; then
+                            echo "✓ API report created successfully"
+                            ls -lh ${workspace}/zap-reports/zap_api_report.html
+                        else
+                            echo "✗ API report NOT created!"
+                        fi
                     """
 
                     // ================= FULL SCAN =================
                     echo "Starting ZAP Full Scan..."
-                    sh """
+                    def fullScanStatus = sh(script: """
                         docker run --rm \
-                            --user \$(id -u):\$(id -g) \
                             --network=${networkName} \
                             -v ${workspace}/zap-reports:/zap/wrk/:rw \
                             ${zapImage} zap-full-scan.py \
                             -t http://auth-service:8080 \
                             -r zap_full_report.html \
                             -J zap_full_report.json \
-                            -I || true
+                            -I
+                    """, returnStatus: true)
+                    
+                    echo "Full Scan completed with status: ${fullScanStatus}"
+                    
+                    // Check if report was created
+                    sh """
+                        if [ -f "${workspace}/zap-reports/zap_full_report.html" ]; then
+                            echo "✓ Full report created successfully"
+                            ls -lh ${workspace}/zap-reports/zap_full_report.html
+                        else
+                            echo "✗ Full report NOT created!"
+                        fi
                     """
+                    
+                    // List all files created
+                    echo "All files in zap-reports:"
+                    sh "ls -lah ${workspace}/zap-reports/"
                 }
             }
         }
     }
+    
     post {
         always {
             script {
-                // Debug: Check what we have
+                echo "=== Final Report Check ==="
                 sh """
-                    echo "=== Workspace contents ==="
+                    echo "Contents of zap-reports directory:"
                     ls -lah ${WORKSPACE}/zap-reports/ || echo "Directory not found"
-                    echo "=== PWD ==="
-                    pwd
-                    ls -lah
+                    
+                    echo ""
+                    echo "Checking for specific files:"
+                    [ -f "${WORKSPACE}/zap-reports/zap_api_report.html" ] && echo "✓ API HTML exists" || echo "✗ API HTML missing"
+                    [ -f "${WORKSPACE}/zap-reports/zap_api_report.json" ] && echo "✓ API JSON exists" || echo "✗ API JSON missing"
+                    [ -f "${WORKSPACE}/zap-reports/zap_full_report.html" ] && echo "✓ Full HTML exists" || echo "✗ Full HTML missing"
+                    [ -f "${WORKSPACE}/zap-reports/zap_full_report.json" ] && echo "✓ Full JSON exists" || echo "✗ Full JSON missing"
                 """
                 
-                // Fix all permissions recursively
-                sh """
-                    chmod -R 755 ${WORKSPACE}/zap-reports
-                    find ${WORKSPACE}/zap-reports -type f -exec chmod 644 {} \\;
-                """
+                // Fix permissions
+                sh "chmod -R 755 ${WORKSPACE}/zap-reports || true"
                 
-                // Archive as artifacts (this usually works when publishHTML doesn't)
-                archiveArtifacts artifacts: 'zap-reports/*.html, zap-reports/*.json', 
+                // Archive artifacts - will succeed even if some files are missing
+                archiveArtifacts artifacts: 'zap-reports/*', 
                                 allowEmptyArchive: true,
                                 fingerprint: true
                 
-                // Try publishHTML with more permissive settings
+                // Publish HTML reports
                 publishHTML([
                     allowMissing: true,
                     alwaysLinkToLastBuild: true,
@@ -143,6 +201,13 @@ pipeline {
                     reportFiles: 'zap_full_report.html',
                     reportName: 'ZAP Full Report'
                 ])
+            }
+        }
+        
+        cleanup {
+            script {
+                echo "Cleaning up test environment..."
+                sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" down -v || true'
             }
         }
     }
