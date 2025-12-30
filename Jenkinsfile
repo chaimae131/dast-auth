@@ -63,19 +63,19 @@ pipeline {
         stage('Run DAST Scans - Unauthenticated') {
             steps {
                 script {
-                    sh 'mkdir -p zap-reports && chmod 777 zap-reports'
+                    // Use Jenkins workspace
+                    def workspace = env.WORKSPACE
+                    sh "mkdir -p ${workspace}/zap-reports && chmod 777 ${workspace}/zap-reports"
 
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     def zapImage   = "ghcr.io/zaproxy/zaproxy:stable"
 
                     // ================= API SCAN =================
                     echo "Starting ZAP API Scan..."
-                    // Using || true ensures that ZAP exit codes (1 or 2) don't stop the pipeline
                     sh """
                         docker run --rm \
-                            --user \$(id -u):\$(id -g) \
                             --network=${networkName} \
-                            -v \$(pwd)/zap-reports:/zap/wrk/:rw \
+                            -v ${workspace}/zap-reports:/zap/wrk/:rw \
                             ${zapImage} zap-api-scan.py \
                             -t http://auth-service:8080/v3/api-docs \
                             -f openapi \
@@ -89,9 +89,8 @@ pipeline {
                     echo "Starting ZAP Full Scan..."
                     sh """
                         docker run --rm \
-                            --user \$(id -u):\$(id -g) \
                             --network=${networkName} \
-                            -v \$(pwd)/zap-reports:/zap/wrk/:rw \
+                            -v ${workspace}/zap-reports:/zap/wrk/:rw \
                             ${zapImage} zap-full-scan.py \
                             -t http://auth-service:8080 \
                             -r zap_full_report.html \
@@ -102,35 +101,31 @@ pipeline {
             }
         }
 
-    }
-        
-            
-    post {
-        always {
-            script {
-                // Ensure HTML Publisher plugin is installed
-                publishHTML(target: [
-                    allowMissing: true,
-                    alwaysLinkToLastBuild: true,
-                    keepAll: true,
-                    reportDir: 'zap-reports',
-                    reportFiles: 'zap_api_report.html',
-                    reportName: 'ZAP API Report',
-                    reportTitles: 'API Security Scan'
-                ])
-                
-                publishHTML(target: [
-                    allowMissing: true,
-                    alwaysLinkToLastBuild: true,
-                    keepAll: true,
-                    reportDir: 'zap-reports',
-                    reportFiles: 'zap_full_report.html',
-                    reportName: 'ZAP Full Report',
-                    reportTitles: 'Full DAST Scan'
-                ])
-
-                
+        post {
+            always {
+                script {
+                    // Publish HTML reports
+                    publishHTML(target: [
+                        allowMissing: true,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'zap-reports',
+                        reportFiles: 'zap_api_report.html',
+                        reportName: 'ZAP API Report',
+                        reportTitles: 'API Security Scan'
+                    ])
+                    
+                    publishHTML(target: [
+                        allowMissing: true,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'zap-reports',
+                        reportFiles: 'zap_full_report.html',
+                        reportName: 'ZAP Full Report',
+                        reportTitles: 'Full DAST Scan'
+                    ])
+                }
             }
         }
-    }
+
 }
