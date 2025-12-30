@@ -63,7 +63,6 @@ pipeline {
         stage('Run DAST Scans - Unauthenticated') {
             steps {
                 script {
-                    // Use Jenkins workspace
                     def workspace = env.WORKSPACE
                     sh "mkdir -p ${workspace}/zap-reports && chmod 777 ${workspace}/zap-reports"
 
@@ -74,6 +73,7 @@ pipeline {
                     echo "Starting ZAP API Scan..."
                     sh """
                         docker run --rm \
+                            --user root \
                             --network=${networkName} \
                             -v ${workspace}/zap-reports:/zap/wrk/:rw \
                             ${zapImage} zap-api-scan.py \
@@ -89,6 +89,7 @@ pipeline {
                     echo "Starting ZAP Full Scan..."
                     sh """
                         docker run --rm \
+                            --user root \
                             --network=${networkName} \
                             -v ${workspace}/zap-reports:/zap/wrk/:rw \
                             ${zapImage} zap-full-scan.py \
