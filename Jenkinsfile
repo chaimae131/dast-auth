@@ -51,7 +51,7 @@ pipeline {
                             echo "Creating authdb if it does not exist..."
                             docker exec -i postgres-db psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='authdb'" | grep -q 1 || \
                             docker exec -i postgres-db psql -U postgres -c "CREATE DATABASE authdb;"
-                            
+
                             # Start auth-service after DB is ready
                             docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d auth-service --wait
                         '''
@@ -78,8 +78,18 @@ pipeline {
                             --network=dast-auth_app-network \
                             -v $(pwd)/zap-reports:/zap/wrk/:rw \
                             ghcr.io/zaproxy/zaproxy:stable zap-api-scan.py \
-                            -t http://auth-service:8080/v3/api-docs -f openapi
-                        '''
+                            -t http://auth-service:8080/v3/api-docs \
+                            -f openapi \
+                            -O http://auth-service:8080 \
+                            -r zap_api_report.html \
+                            -J zap_api_report.json \
+                            -z "-config replacer.full_list(0).description=auth \
+                                -config replacer.full_list(0).enabled=true \
+                                -config replacer.full_list(0).matchtype=REQ_HEADER \
+                                -config replacer.full_list(0).matchstr=Authorization \
+                                -config replacer.full_list(0).regex=false \
+                                -config replacer.full_list(0).replacement='Bearer ${token}'"
+                        """
                     }
 
                     
