@@ -99,68 +99,47 @@ pipeline {
             }
         }
 
-    
         stage('Run DAST Scans - Unauthenticated') {
             steps {
                 script {
-                    def workspace = env.WORKSPACE
-                    sh "mkdir -p ${workspace}/zap-reports"
+                    sh 'mkdir -p zap-reports && chmod 777 zap-reports'
 
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
-                    def zapImage = "ghcr.io/zaproxy/zaproxy:stable"
-
-                    // 1. Cleanup any old containers from failed runs
-                    sh "docker rm -f zap_api_scan zap_full_scan || true"
+                    def zapImage   = "ghcr.io/zaproxy/zaproxy:stable"
 
                     // ================= API SCAN =================
                     echo "=== Starting ZAP API Scan ==="
-                    // We remove -v and --rm. We use --name so we can find it.
                     sh """
-                        docker run --name zap_api_scan \
-                            --network=${networkName} \
-                            ${zapImage} zap-api-scan.py \
-                            -t http://auth-service:8080/v3/api-docs \
-                            -f openapi \
-                            -r zap_api_report.html \
-                            -J zap_api_report.json \
-                            -I || true
-                    """
-
-                    // Pull the files out of the container before it's deleted
-                    echo "Extracting API reports..."
-                    sh """
-                        docker cp zap_api_scan:/zap/wrk/zap_api_report.html ${workspace}/zap-reports/ || echo "HTML missing"
-                        docker cp zap_api_scan:/zap/wrk/zap_api_report.json ${workspace}/zap-reports/ || echo "JSON missing"
-                        docker rm -f zap_api_scan
+                    docker run --rm \
+                        --network=${networkName} \
+                        -v \$(pwd)/zap-reports:/zap/wrk/:rw \
+                        ${zapImage} zap-api-scan.py \
+                        -t http://auth-service:8080/v3/api-docs \
+                        -f openapi \
+                        -r zap_api_report.html \
+                        -J zap_api_report.json \
+                        -I
                     """
 
                     // ================= FULL SCAN =================
                     echo "=== Starting ZAP Full Scan ==="
                     sh """
-                        docker run --name zap_full_scan \
-                            --network=${networkName} \
-                            ${zapImage} zap-full-scan.py \
-                            -t http://auth-service:8080 \
-                            -r zap_full_report.html \
-                            -J zap_full_report.json \
-                            -I || true
+                    docker run --rm \
+                        --network=${networkName} \
+                        -v \$(pwd)/zap-reports:/zap/wrk/:rw \
+                        ${zapImage} zap-full-scan.py \
+                        -t http://auth-service:8080 \
+                        -r zap_full_report.html \
+                        -J zap_full_report.json \
+                        -I
                     """
 
-                    echo "Extracting Full reports..."
-                    sh """
-                        docker cp zap_full_scan:/zap/wrk/zap_full_report.html ${workspace}/zap-reports/ || echo "Full HTML missing"
-                        docker cp zap_full_scan:/zap/wrk/zap_full_report.json ${workspace}/zap-reports/ || echo "Full JSON missing"
-                        docker rm -f zap_full_scan
-                    """
-
-                    // ================= VERIFICATION =================
-                    sh """
-                        echo "Checking workspace for extracted files:"
-                        ls -lah ${workspace}/zap-reports/
-                    """
+                    echo "=== Reports generated ==="
+                    sh "ls -lah zap-reports/"
                 }
             }
         }
+
     }
     
     post {
