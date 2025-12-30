@@ -103,7 +103,8 @@ pipeline {
             steps {
                 script {
                     def workspace = env.WORKSPACE
-                    sh "rm -rf ${workspace}/zap-reports && mkdir -p ${workspace}/zap-reports && chmod 777 ${workspace}/zap-reports"
+                    // Clean and recreate local reports directory
+                    sh "rm -rf ${workspace}/zap-reports && mkdir -p ${workspace}/zap-reports"
 
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     def zapImage = "ghcr.io/zaproxy/zaproxy:stable"
@@ -111,84 +112,54 @@ pipeline {
                     // ================= API SCAN =================
                     echo "=== Starting ZAP API Scan ==="
                     
-                    // First verify ZAP can reach the service
-                    echo "Pre-flight check: Testing connectivity..."
-                    sh """
-                        docker run --rm --network=${networkName} curlimages/curl:latest \
-                            curl -v http://auth-service:8080/v3/api-docs
-                    """
-                    
-                    echo "Running ZAP API scan..."
-                    def apiScanStatus = sh(
-                        script: """
-                            docker run --rm \
-                                --user \$(id -u):\$(id -g) \
-                                --network=${networkName} \
-                                -v ${workspace}/zap-reports:/zap/wrk/:rw \
-                                ${zapImage} zap-api-scan.py \
-                                -t http://auth-service:8080/v3/api-docs \
-                                -f openapi \
-                                -r zap_api_report.html \
-                                -J zap_api_report.json \
-                        """, 
-                        returnStatus: true
-                    )
-                    
-                    echo "API Scan exit code: ${apiScanStatus}"
-                    
-                    sh """
-                        echo "Checking for API report files..."
-                        ls -lah ${workspace}/zap-reports/
+                    // Note: We REMOVED --rm so we can copy files out before the container is deleted
+                    sh(script: """
+                        docker run --name zap_api_scan \
+                            --network=${networkName} \
+                            ${zapImage} zap-api-scan.py \
+                            -t http://auth-service:8080/v3/api-docs \
+                            -f openapi \
+                            -r zap_api_report.html \
+                            -J zap_api_report.json \
+                            -I || true
                         
-                        if [ -f "${workspace}/zap-reports/zap_api_report.html" ]; then
-                            echo "✓ API HTML report created"
-                            wc -l ${workspace}/zap-reports/zap_api_report.html
-                        else
-                            echo "✗ API HTML report missing!"
-                        fi
+                        # Copy files from container to Jenkins workspace
+                        docker cp zap_api_scan:/zap/wrk/zap_api_report.html ${workspace}/zap-reports/
+                        docker cp zap_api_scan:/zap/wrk/zap_api_report.json ${workspace}/zap-reports/
                         
-                        if [ -f "${workspace}/zap-reports/zap_api_report.json" ]; then
-                            echo "✓ API JSON report created"
-                        else
-                            echo "✗ API JSON report missing!"
-                        fi
-                    """
+                        # Now remove the container
+                        docker rm zap_api_scan
+                    """)
 
                     // ================= FULL SCAN =================
                     echo "=== Starting ZAP Full Scan ==="
                     
-                    def fullScanStatus = sh(
-                        script: """
-                            docker run --rm \
-                                --user \$(id -u):\$(id -g) \
-                                --network=${networkName} \
-                                -v ${workspace}/zap-reports:/zap/wrk/:rw \
-                                ${zapImage} zap-full-scan.py \
-                                -t http://auth-service:8080 \
-                                -r zap_full_report.html \
-                                -J zap_full_report.json \
-                                -I
-                        """, 
-                        returnStatus: true
-                    )
-                    
-                    echo "Full Scan exit code: ${fullScanStatus}"
-                    
+                    sh(script: """
+                        docker run --name zap_full_scan \
+                            --network=${networkName} \
+                            ${zapImage} zap-full-scan.py \
+                            -t http://auth-service:8080 \
+                            -r zap_full_report.html \
+                            -J zap_full_report.json \
+                            -I || true
+                        
+                        # Copy files from container to Jenkins workspace
+                        docker cp zap_full_scan:/zap/wrk/zap_full_report.html ${workspace}/zap-reports/
+                        docker cp zap_full_scan:/zap/wrk/zap_full_report.json ${workspace}/zap-reports/
+                        
+                        # Now remove the container
+                        docker rm zap_full_scan
+                    """)
+
+                    // ================= VERIFICATION =================
                     sh """
-                        echo "Checking for Full Scan report files..."
+                        echo "Final check for report files in: ${workspace}/zap-reports/"
                         ls -lah ${workspace}/zap-reports/
                         
-                        if [ -f "${workspace}/zap-reports/zap_full_report.html" ]; then
-                            echo "✓ Full HTML report created"
-                            wc -l ${workspace}/zap-reports/zap_full_report.html
+                        if [ -f "${workspace}/zap-reports/zap_api_report.html" ]; then
+                            echo "✓ API HTML report found!"
                         else
-                            echo "✗ Full HTML report missing!"
-                        fi
-                        
-                        if [ -f "${workspace}/zap-reports/zap_full_report.json" ]; then
-                            echo "✓ Full JSON report created"
-                        else
-                            echo "✗ Full JSON report missing!"
+                            echo "✗ API HTML report STILL missing!"
                         fi
                     """
                 }
