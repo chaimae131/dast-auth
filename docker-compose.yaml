@@ -1,7 +1,7 @@
 services:
   postgres-db:
     image: postgres:16
-    container_name: postgres-db-ci
+    container_name: postgres-db
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=${DB_PASS}
