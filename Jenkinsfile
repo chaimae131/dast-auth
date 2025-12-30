@@ -15,13 +15,15 @@ pipeline {
             }
         }
 
+        
         stage('Start Test Environment') {
             steps {
                 script {
                     sh "chmod -R +r ./init-db"
                     
-                    // Clean previous containers & volumes to avoid conflicts
+                    // Clean previous containers & volumes
                     sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" down -v'
+
                     withCredentials([
                         string(credentialsId: 'discovery-image-id', variable: 'DISCOVERY_IMAGE'),
                         string(credentialsId: 'gateway-image-id', variable: 'GATEWAY_IMAGE'),
@@ -41,14 +43,23 @@ pipeline {
                             export JWT_SECRET="${JWT_SECRET}"
                             export EMAIL_AD="${EMAIL_AD}"
                             export EMAIL_PASS="${EMAIL_PASS}"
-                            
-                            # Using 'docker compose' (space) for modern compatibility
-                            docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d --wait
+
+                            # 1️⃣ Start only Postgres + discovery + gateway
+                            docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d postgres-db-ci discovery-service gateway-service --wait
+
+                            # 2️⃣ Ensure authdb exists
+                            echo "Creating authdb if it does not exist..."
+                            docker exec -i postgres-db-ci psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='authdb'" | grep -q 1 || \
+                            docker exec -i postgres-db-ci psql -U postgres -c "CREATE DATABASE authdb;"
+
+                            # 3️⃣ Start auth-service after DB is ready
+                            docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d auth-service --wait
                         '''
                     }
                 }
             }
         }
+
 
         stage('Run DAST Scans') {
             steps {

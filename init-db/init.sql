@@ -1,2 +1,1 @@
 CREATE DATABASE authdb;
-CREATE DATABASE matchdb;

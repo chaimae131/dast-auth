@@ -39,7 +39,7 @@ services:
     ports:
       - "8222:8222"
     environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+      - EUREKA=http://discovery-service:8761/eureka/
     depends_on:
       discovery-service:
         condition: service_healthy # Wait for discovery
@@ -52,13 +52,16 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+      - EUREKA=http://discovery-service:8761/eureka/
       - DB_USERNAME=postgres
       - DB_URL=jdbc:postgresql://postgres-db:5432/authdb
       - DB_PASSWORD=${DB_PASS}
       - JWT_SECRET=${JWT_SECRET}
       - EMAIL_AD=${EMAIL_AD}
       - EMAIL_PASS=${EMAIL_PASS}
+    depends_on:
+      - discovery-service
+      - postgres-db
     networks:
       - ci-network
 
