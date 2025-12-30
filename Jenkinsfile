@@ -104,9 +104,8 @@ pipeline {
     post {
         always {
             script {
-                // Publish HTML reports
-                publishHTML(target: [
-                    allowMissing: true,
+                publishHTML([
+                    allowMissing: false,
                     alwaysLinkToLastBuild: true,
                     keepAll: true,
                     reportDir: 'zap-reports',
@@ -115,8 +114,8 @@ pipeline {
                     reportTitles: 'API Security Scan'
                 ])
                 
-                publishHTML(target: [
-                    allowMissing: true,
+                publishHTML([
+                    allowMissing: false,
                     alwaysLinkToLastBuild: true,
                     keepAll: true,
                     reportDir: 'zap-reports',
