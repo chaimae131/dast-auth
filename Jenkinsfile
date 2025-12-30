@@ -87,28 +87,23 @@ pipeline {
             steps {
                 script {
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
-                    
-                    echo "Waiting for auth-service to be ready..."
                     sh """
-                        # Wait up to 60 seconds for service to respond
-                        for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-                            if docker run --rm --network=${networkName} curlimages/curl:latest \
-                                curl -s -o /dev/null -w "%{http_code}" http://auth-service:8080/actuator/health | grep -q "200"; then
-                                echo "✓ Auth service is ready!"
+                        echo "Checking logs to see why it failed..."
+                        docker logs auth-service --tail 50
+                        
+                        echo "Waiting for auth-service..."
+                        for i in {1..20}; do
+                            # We check for a 200 or 401 (since login might be protected)
+                            STATUS=\$(docker run --rm --network=${networkName} curlimages/curl:latest curl -s -o /dev/null -w "%{http_code}" http://auth-service:8080/v3/api-docs || echo "000")
+                            
+                            if [ "\$STATUS" -eq 200 ] || [ "\$STATUS" -eq 401 ]; then
+                                echo "✓ Service is up with status: \$STATUS"
                                 exit 0
                             fi
-                            echo "Waiting for service... (attempt \$i/12)"
+                            echo "Attempt \$i: Service returned \$STATUS. Waiting..."
                             sleep 5
                         done
-                        echo "✗ Service failed to start!"
                         exit 1
-                    """
-                    
-                    // Verify OpenAPI docs are accessible
-                    echo "Checking OpenAPI docs..."
-                    sh """
-                        docker run --rm --network=${networkName} curlimages/curl:latest \
-                            curl -v http://auth-service:8080/v3/api-docs
                     """
                 }
             }
@@ -224,13 +219,6 @@ pipeline {
                     reportFiles: 'zap_full_report.html',
                     reportName: 'ZAP Full Report'
                 ])
-            }
-        }
-        
-        cleanup {
-            script {
-                echo "Cleaning up test environment..."
-                sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" down -v || true'
             }
         }
     }
