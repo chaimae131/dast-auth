@@ -62,14 +62,15 @@ pipeline {
                     // API Scan
                     echo "Starting ZAP API Scan..."
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                        sh """
+                        sh '''
                         docker run --rm \
                             --network=dast-auth_app-network \
                             -v $(pwd)/zap-reports:/zap/wrk/:rw \
                             ghcr.io/zaproxy/zaproxy:stable zap-api-scan.py \
                             -t http://auth-service:8080/v3/api-docs -f openapi
-                        """
+                        '''
                     }
+
                     
                     // Full Scan
                     echo "Starting ZAP Full Scan..."
@@ -85,6 +86,7 @@ pipeline {
                             -I
                         """
                     }
+
                 }
             }
         }
