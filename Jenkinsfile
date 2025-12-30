@@ -73,7 +73,7 @@ pipeline {
                     echo "Starting ZAP API Scan..."
                     sh """
                         docker run --rm \
-                            --user root \
+                            --user \$(id -u):\$(id -g) \
                             --network=${networkName} \
                             -v ${workspace}/zap-reports:/zap/wrk/:rw \
                             ${zapImage} zap-api-scan.py \
@@ -89,7 +89,7 @@ pipeline {
                     echo "Starting ZAP Full Scan..."
                     sh """
                         docker run --rm \
-                            --user root \
+                            --user \$(id -u):\$(id -g) \
                             --network=${networkName} \
                             -v ${workspace}/zap-reports:/zap/wrk/:rw \
                             ${zapImage} zap-full-scan.py \
