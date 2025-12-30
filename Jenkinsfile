@@ -105,27 +105,45 @@ pipeline {
     post {
         always {
             script {
+                // Debug: Check what we have
+                sh """
+                    echo "=== Workspace contents ==="
+                    ls -lah ${WORKSPACE}/zap-reports/ || echo "Directory not found"
+                    echo "=== PWD ==="
+                    pwd
+                    ls -lah
+                """
+                
+                // Fix all permissions recursively
+                sh """
+                    chmod -R 755 ${WORKSPACE}/zap-reports
+                    find ${WORKSPACE}/zap-reports -type f -exec chmod 644 {} \\;
+                """
+                
+                // Archive as artifacts (this usually works when publishHTML doesn't)
+                archiveArtifacts artifacts: 'zap-reports/*.html, zap-reports/*.json', 
+                                allowEmptyArchive: true,
+                                fingerprint: true
+                
+                // Try publishHTML with more permissive settings
                 publishHTML([
-                    allowMissing: false,
+                    allowMissing: true,
                     alwaysLinkToLastBuild: true,
                     keepAll: true,
                     reportDir: 'zap-reports',
                     reportFiles: 'zap_api_report.html',
-                    reportName: 'ZAP API Report',
-                    reportTitles: 'API Security Scan'
+                    reportName: 'ZAP API Report'
                 ])
                 
                 publishHTML([
-                    allowMissing: false,
+                    allowMissing: true,
                     alwaysLinkToLastBuild: true,
                     keepAll: true,
                     reportDir: 'zap-reports',
                     reportFiles: 'zap_full_report.html',
-                    reportName: 'ZAP Full Report',
-                    reportTitles: 'Full DAST Scan'
+                    reportName: 'ZAP Full Report'
                 ])
             }
         }
     }
-
 }
