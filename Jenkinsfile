@@ -60,24 +60,33 @@ pipeline {
             }
         }
 
-
         stage('Run DAST Scans') {
             steps {
                 script {
                     sh 'mkdir -p zap-reports && chmod 777 zap-reports'
-                    def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
-                    
-                    // NEW CORRECT IMAGE from GitHub Container Registry
-                    def zapImage = "ghcr.io/zaproxy/zaproxy:stable"
 
-                    // API Scan
+                    def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
+                    def zapImage   = "ghcr.io/zaproxy/zaproxy:stable"
+
+                    // ---- Get JWT token (REQUIRED) ----
+                    def token = sh(
+                        script: """
+                            curl -s -X POST http://auth-service:8080/api/auth/login \
+                            -H 'Content-Type: application/json' \
+                            -d '{"username":"testuser","password":"password"}' \
+                            | jq -r .token
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    // ================= API SCAN =================
                     echo "Starting ZAP API Scan..."
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                        sh '''
+                        sh """
                         docker run --rm \
-                            --network=dast-auth_app-network \
-                            -v $(pwd)/zap-reports:/zap/wrk/:rw \
-                            ghcr.io/zaproxy/zaproxy:stable zap-api-scan.py \
+                            --network=${networkName} \
+                            -v \$(pwd)/zap-reports:/zap/wrk/:rw \
+                            ${zapImage} zap-api-scan.py \
                             -t http://auth-service:8080/v3/api-docs \
                             -f openapi \
                             -O http://auth-service:8080 \
@@ -88,31 +97,38 @@ pipeline {
                                 -config replacer.full_list(0).matchtype=REQ_HEADER \
                                 -config replacer.full_list(0).matchstr=Authorization \
                                 -config replacer.full_list(0).regex=false \
-                                -config replacer.full_list(0).replacement='Bearer ${token}'"
+                                -config replacer.full_list(0).replacement=Bearer\\ ${token}"
                         """
                     }
 
-                    
-                    // Full Scan
+                    // ================= FULL SCAN =================
                     echo "Starting ZAP Full Scan..."
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
-                            --network=dast-auth_app-network \
+                            --network=${networkName} \
                             -v \$(pwd)/zap-reports:/zap/wrk/:rw \
                             ${zapImage} zap-full-scan.py \
-                            -t ${TARGET_URL} \
+                            -t http://auth-service:8080 \
                             -r zap_full_report.html \
                             -J zap_full_report.json \
-                            -I
+                            -I \
+                            -z "-config replacer.full_list(0).description=auth \
+                                -config replacer.full_list(0).enabled=true \
+                                -config replacer.full_list(0).matchtype=REQ_HEADER \
+                                -config replacer.full_list(0).matchstr=Authorization \
+                                -config replacer.full_list(0).regex=false \
+                                -config replacer.full_list(0).replacement=Bearer\\ ${token}"
                         """
                     }
-
                 }
             }
         }
-    }
 
+
+
+        
+            
     post {
         always {
             script {
