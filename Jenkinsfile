@@ -130,7 +130,6 @@ pipeline {
                                 -f openapi \
                                 -r zap_api_report.html \
                                 -J zap_api_report.json \
-                                -I
                         """, 
                         returnStatus: true
                     )
@@ -241,11 +240,7 @@ pipeline {
             }
         }
         
-        cleanup {
-            script {
-                echo "=== Cleanup: Stopping containers ==="
-                sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" down -v || true'
-            }
-        }
+        
+        
     }
 }
