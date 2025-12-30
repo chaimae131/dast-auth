@@ -102,41 +102,50 @@ pipeline {
         stage('Run DAST Scans - Unauthenticated') {
             steps {
                 script {
-                    sh 'mkdir -p zap-reports && chmod 777 zap-reports'
+                    // Create local folder
+                    sh "mkdir -p zap-reports"
 
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     def zapImage   = "ghcr.io/zaproxy/zaproxy:stable"
 
                     // ================= API SCAN =================
                     echo "=== Starting ZAP API Scan ==="
+                    // We give it a --name and REMOVE --rm so it stays alive long enough to copy files
                     sh """
-                    docker run --rm \
-                        --user \$(id -u):\$(id -g) \
-                        --network=${networkName} \
-                        -v \$(pwd)/zap-reports:/zap/wrk/:rw \
-                        ${zapImage} zap-api-scan.py \
-                        -t http://auth-service:8080/v3/api-docs \
-                        -f openapi \
-                        -r zap_api_report.html \
-                        -J zap_api_report.json \
-                        -I
+                        docker rm -f zap_api_scan || true
+                        docker run --name zap_api_scan \
+                            --network=${networkName} \
+                            ${zapImage} zap-api-scan.py \
+                            -t http://auth-service:8080/v3/api-docs \
+                            -f openapi \
+                            -r zap_api_report.html \
+                            -J zap_api_report.json \
+                            -I || true
+                        
+                        # Copy the files out manually
+                        docker cp zap_api_scan:/zap/wrk/zap_api_report.html ./zap-reports/ || echo "HTML failed"
+                        docker cp zap_api_scan:/zap/wrk/zap_api_report.json ./zap-reports/ || echo "JSON failed"
+                        docker rm -f zap_api_scan
                     """
 
                     // ================= FULL SCAN =================
                     echo "=== Starting ZAP Full Scan ==="
                     sh """
-                    docker run --rm \
-                        --user \$(id -u):\$(id -g) \
-                        --network=${networkName} \
-                        -v \$(pwd)/zap-reports:/zap/wrk/:rw \
-                        ${zapImage} zap-full-scan.py \
-                        -t http://auth-service:8080 \
-                        -r zap_full_report.html \
-                        -J zap_full_report.json \
-                        -I
+                        docker rm -f zap_full_scan || true
+                        docker run --name zap_full_scan \
+                            --network=${networkName} \
+                            ${zapImage} zap-full-scan.py \
+                            -t http://auth-service:8080 \
+                            -r zap_full_report.html \
+                            -J zap_full_report.json \
+                            -I || true
+                        
+                        # Copy the files out manually
+                        docker cp zap_full_scan:/zap/wrk/zap_full_report.html ./zap-reports/ || echo "Full HTML failed"
+                        docker cp zap_full_scan:/zap/wrk/zap_full_report.json ./zap-reports/ || echo "Full JSON failed"
+                        docker rm -f zap_full_scan
                     """
 
-                    echo "=== Reports generated ==="
                     sh "ls -lah zap-reports/"
                 }
             }
