@@ -59,7 +59,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - EMAIL_AD=${EMAIL_AD}
       - EMAIL_PASS=${EMAIL_PASS}
-    depends_on:  # Remove one of these
+    depends_on:  
       postgres-db:
         condition: service_healthy
       discovery-service:
