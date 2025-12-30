@@ -15,7 +15,6 @@ pipeline {
             }
         }
 
-        
         stage('Start Test Environment') {
             steps {
                 script {
@@ -44,10 +43,10 @@ pipeline {
                             export EMAIL_AD="${EMAIL_AD}"
                             export EMAIL_PASS="${EMAIL_PASS}"
 
-                            #  Start only Postgres + discovery + gateway
+                            # Start only Postgres + discovery + gateway
                             docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d postgres-db discovery-service gateway-service --wait
 
-                            #  Ensure authdb exists
+                            # Ensure authdb exists
                             echo "Creating authdb if it does not exist..."
                             docker exec -i postgres-db psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='authdb'" | grep -q 1 || \
                             docker exec -i postgres-db psql -U postgres -c "CREATE DATABASE authdb;"
@@ -60,55 +59,40 @@ pipeline {
             }
         }
 
-        stage('Debug Environment') {
+        stage('Wait for Service Ready') {
             steps {
                 script {
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     
-                    echo "=== Checking Running Containers ==="
-                    sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" ps'
-                    
-                    echo "=== Checking Networks ==="
-                    sh "docker network ls | grep ${COMPOSE_PROJECT_NAME} || echo 'Network not found'"
+                    echo "=== Checking container status ==="
+                    sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" ps'
                     
                     echo "=== Checking auth-service logs ==="
-                    sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" logs auth-service || echo "No logs found"'
+                    sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" logs --tail=30 auth-service'
                     
-                    echo "=== Testing connectivity from another container ==="
+                    echo "=== Waiting for auth-service to respond ==="
                     sh """
-                        docker run --rm --network=${networkName} curlimages/curl:latest \
-                            curl -v --max-time 10 http://auth-service:8080/actuator/health || echo "Connection failed"
-                    """
-                }
-            }
-        }
-        
-        stage('Verify Service is Up') {
-            steps {
-                script {
-                    def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
-                    sh """
-                        echo "=== Current App Logs ==="
-                        docker logs auth-service --tail 20
-
-                        echo "=== Starting Wait Loop ==="
-                        # Use a standard while loop for better compatibility
-                        i=1
-                        while [ \$i -le 20 ]; do
-                            STATUS=\$(docker run --rm --network=${networkName} curlimages/curl:latest curl -s -o /dev/null -w "%{http_code}" http://auth-service:8080/v3/api-docs || echo "000")
+                        # Wait up to 2 minutes for service
+                        for i in \$(seq 1 24); do
+                            echo "Attempt \$i/24: Testing service..."
                             
-                            if [ "\$STATUS" -eq 200 ] || [ "\$STATUS" -eq 401 ]; then
-                                echo "✓ Service is up! (Status: \$STATUS)"
+                            # Test the actual endpoint we'll scan
+                            if docker run --rm --network=${networkName} curlimages/curl:latest \
+                                curl -s --max-time 5 http://auth-service:8080/v3/api-docs > /dev/null 2>&1; then
+                                echo "✓ Service is responding!"
+                                
+                                # Verify it's actually working
+                                docker run --rm --network=${networkName} curlimages/curl:latest \
+                                    curl -s http://auth-service:8080/v3/api-docs | head -20
                                 exit 0
                             fi
-
-                            echo "Attempt \$i: Service returned \$STATUS. Waiting 5s..."
+                            
                             sleep 5
-                            i=\$((i+1))
                         done
-
-                        echo "✗ Timeout: Service did not start in time."
-                        docker logs auth-service
+                        
+                        echo "✗ Service failed to respond in time!"
+                        echo "=== Final logs ==="
+                        docker compose -p "${COMPOSE_PROJECT_NAME}" logs auth-service
                         exit 1
                     """
                 }
@@ -122,62 +106,90 @@ pipeline {
                     sh "rm -rf ${workspace}/zap-reports && mkdir -p ${workspace}/zap-reports && chmod 777 ${workspace}/zap-reports"
 
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
-                    def zapImage   = "ghcr.io/zaproxy/zaproxy:stable"
+                    def zapImage = "ghcr.io/zaproxy/zaproxy:stable"
 
                     // ================= API SCAN =================
-                    echo "Starting ZAP API Scan..."
-                    def apiScanStatus = sh(script: """
-                        docker run --rm \
-                            --network=${networkName} \
-                            -v ${workspace}/zap-reports:/zap/wrk/:rw \
-                            ${zapImage} zap-api-scan.py \
-                            -t http://auth-service:8080/v3/api-docs \
-                            -f openapi \
-                            -r zap_api_report.html \
-                            -J zap_api_report.json \
-                            -I
-                    """, returnStatus: true)
+                    echo "=== Starting ZAP API Scan ==="
                     
-                    echo "API Scan completed with status: ${apiScanStatus}"
-                    
-                    // Check if report was created
+                    // First verify ZAP can reach the service
+                    echo "Pre-flight check: Testing connectivity..."
                     sh """
+                        docker run --rm --network=${networkName} curlimages/curl:latest \
+                            curl -v http://auth-service:8080/v3/api-docs
+                    """
+                    
+                    echo "Running ZAP API scan..."
+                    def apiScanStatus = sh(
+                        script: """
+                            docker run --rm \
+                                --network=${networkName} \
+                                -v ${workspace}/zap-reports:/zap/wrk/:rw \
+                                ${zapImage} zap-api-scan.py \
+                                -t http://auth-service:8080/v3/api-docs \
+                                -f openapi \
+                                -r zap_api_report.html \
+                                -J zap_api_report.json \
+                                -I
+                        """, 
+                        returnStatus: true
+                    )
+                    
+                    echo "API Scan exit code: ${apiScanStatus}"
+                    
+                    sh """
+                        echo "Checking for API report files..."
+                        ls -lah ${workspace}/zap-reports/
+                        
                         if [ -f "${workspace}/zap-reports/zap_api_report.html" ]; then
-                            echo "✓ API report created successfully"
-                            ls -lh ${workspace}/zap-reports/zap_api_report.html
+                            echo "✓ API HTML report created"
+                            wc -l ${workspace}/zap-reports/zap_api_report.html
                         else
-                            echo "✗ API report NOT created!"
+                            echo "✗ API HTML report missing!"
+                        fi
+                        
+                        if [ -f "${workspace}/zap-reports/zap_api_report.json" ]; then
+                            echo "✓ API JSON report created"
+                        else
+                            echo "✗ API JSON report missing!"
                         fi
                     """
 
                     // ================= FULL SCAN =================
-                    echo "Starting ZAP Full Scan..."
-                    def fullScanStatus = sh(script: """
-                        docker run --rm \
-                            --network=${networkName} \
-                            -v ${workspace}/zap-reports:/zap/wrk/:rw \
-                            ${zapImage} zap-full-scan.py \
-                            -t http://auth-service:8080 \
-                            -r zap_full_report.html \
-                            -J zap_full_report.json \
-                            -I
-                    """, returnStatus: true)
+                    echo "=== Starting ZAP Full Scan ==="
                     
-                    echo "Full Scan completed with status: ${fullScanStatus}"
+                    def fullScanStatus = sh(
+                        script: """
+                            docker run --rm \
+                                --network=${networkName} \
+                                -v ${workspace}/zap-reports:/zap/wrk/:rw \
+                                ${zapImage} zap-full-scan.py \
+                                -t http://auth-service:8080 \
+                                -r zap_full_report.html \
+                                -J zap_full_report.json \
+                                -I
+                        """, 
+                        returnStatus: true
+                    )
                     
-                    // Check if report was created
+                    echo "Full Scan exit code: ${fullScanStatus}"
+                    
                     sh """
+                        echo "Checking for Full Scan report files..."
+                        ls -lah ${workspace}/zap-reports/
+                        
                         if [ -f "${workspace}/zap-reports/zap_full_report.html" ]; then
-                            echo "✓ Full report created successfully"
-                            ls -lh ${workspace}/zap-reports/zap_full_report.html
+                            echo "✓ Full HTML report created"
+                            wc -l ${workspace}/zap-reports/zap_full_report.html
                         else
-                            echo "✗ Full report NOT created!"
+                            echo "✗ Full HTML report missing!"
+                        fi
+                        
+                        if [ -f "${workspace}/zap-reports/zap_full_report.json" ]; then
+                            echo "✓ Full JSON report created"
+                        else
+                            echo "✗ Full JSON report missing!"
                         fi
                     """
-                    
-                    // List all files created
-                    echo "All files in zap-reports:"
-                    sh "ls -lah ${workspace}/zap-reports/"
                 }
             }
         }
@@ -186,24 +198,23 @@ pipeline {
     post {
         always {
             script {
-                echo "=== Final Report Check ==="
+                echo "=== Final Report Summary ==="
                 sh """
-                    echo "Contents of zap-reports directory:"
                     ls -lah ${WORKSPACE}/zap-reports/ || echo "Directory not found"
                     
                     echo ""
-                    echo "Checking for specific files:"
-                    [ -f "${WORKSPACE}/zap-reports/zap_api_report.html" ] && echo "✓ API HTML exists" || echo "✗ API HTML missing"
-                    [ -f "${WORKSPACE}/zap-reports/zap_api_report.json" ] && echo "✓ API JSON exists" || echo "✗ API JSON missing"
-                    [ -f "${WORKSPACE}/zap-reports/zap_full_report.html" ] && echo "✓ Full HTML exists" || echo "✗ Full HTML missing"
-                    [ -f "${WORKSPACE}/zap-reports/zap_full_report.json" ] && echo "✓ Full JSON exists" || echo "✗ Full JSON missing"
+                    echo "Report Status:"
+                    [ -f "${WORKSPACE}/zap-reports/zap_api_report.html" ] && echo "✓ API HTML" || echo "✗ API HTML"
+                    [ -f "${WORKSPACE}/zap-reports/zap_api_report.json" ] && echo "✓ API JSON" || echo "✗ API JSON"
+                    [ -f "${WORKSPACE}/zap-reports/zap_full_report.html" ] && echo "✓ Full HTML" || echo "✗ Full HTML"
+                    [ -f "${WORKSPACE}/zap-reports/zap_full_report.json" ] && echo "✓ Full JSON" || echo "✗ Full JSON"
                 """
                 
                 // Fix permissions
                 sh "chmod -R 755 ${WORKSPACE}/zap-reports || true"
                 
-                // Archive artifacts - will succeed even if some files are missing
-                archiveArtifacts artifacts: 'zap-reports/*', 
+                // Archive all files in zap-reports
+                archiveArtifacts artifacts: 'zap-reports/**/*', 
                                 allowEmptyArchive: true,
                                 fingerprint: true
                 
@@ -225,6 +236,13 @@ pipeline {
                     reportFiles: 'zap_full_report.html',
                     reportName: 'ZAP Full Report'
                 ])
+            }
+        }
+        
+        cleanup {
+            script {
+                echo "=== Cleanup: Stopping containers ==="
+                sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" down -v || true'
             }
         }
     }
