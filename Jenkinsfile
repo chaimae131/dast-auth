@@ -100,32 +100,31 @@ pipeline {
                 }
             }
         }
-
-        post {
-            always {
-                script {
-                    // Publish HTML reports
-                    publishHTML(target: [
-                        allowMissing: true,
-                        alwaysLinkToLastBuild: true,
-                        keepAll: true,
-                        reportDir: 'zap-reports',
-                        reportFiles: 'zap_api_report.html',
-                        reportName: 'ZAP API Report',
-                        reportTitles: 'API Security Scan'
-                    ])
-                    
-                    publishHTML(target: [
-                        allowMissing: true,
-                        alwaysLinkToLastBuild: true,
-                        keepAll: true,
-                        reportDir: 'zap-reports',
-                        reportFiles: 'zap_full_report.html',
-                        reportName: 'ZAP Full Report',
-                        reportTitles: 'Full DAST Scan'
-                    ])
-                }
+    }
+    post {
+        always {
+            script {
+                // Publish HTML reports
+                publishHTML(target: [
+                    allowMissing: true,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'zap-reports',
+                    reportFiles: 'zap_api_report.html',
+                    reportName: 'ZAP API Report',
+                    reportTitles: 'API Security Scan'
+                ])
+                
+                publishHTML(target: [
+                    allowMissing: true,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'zap-reports',
+                    reportFiles: 'zap_full_report.html',
+                    reportName: 'ZAP Full Report',
+                    reportTitles: 'Full DAST Scan'
+                ])
             }
         }
+    }
 
-}
