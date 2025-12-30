@@ -60,7 +60,7 @@ pipeline {
             }
         }
 
-        stage('Run DAST Scans') {
+        stage('Run DAST Scans - Unauthenticated') {
             steps {
                 script {
                     sh 'mkdir -p zap-reports && chmod 777 zap-reports'
@@ -68,18 +68,8 @@ pipeline {
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     def zapImage   = "ghcr.io/zaproxy/zaproxy:stable"
 
-                    // ---- Get JWT token (REQUIRED) ----
-                    def token = sh(
-                        script: """
-                            curl -s -X POST http://auth-service:8080/api/auth/login \
-                            -H 'Content-Type: application/json' \
-                            -d '{"username":"testuser","password":"password"}' \
-                            | jq -r .token
-                        """,
-                        returnStdout: true
-                    ).trim()
-
-                    // ================= API SCAN =================
+                    // ================= API SCAN (Unauthenticated) =================
+                    // Targets the OpenAPI definition and scans endpoints as a guest
                     echo "Starting ZAP API Scan..."
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
@@ -91,17 +81,12 @@ pipeline {
                             -f openapi \
                             -O http://auth-service:8080 \
                             -r zap_api_report.html \
-                            -J zap_api_report.json \
-                            -z "-config replacer.full_list(0).description=auth \
-                                -config replacer.full_list(0).enabled=true \
-                                -config replacer.full_list(0).matchtype=REQ_HEADER \
-                                -config replacer.full_list(0).matchstr=Authorization \
-                                -config replacer.full_list(0).regex=false \
-                                -config replacer.full_list(0).replacement=Bearer\\ ${token}"
+                            -J zap_api_report.json
                         """
                     }
 
-                    // ================= FULL SCAN =================
+                    // ================= FULL SCAN (Unauthenticated) =================
+                    // Traditional spidering and active scan of the base URL
                     echo "Starting ZAP Full Scan..."
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
@@ -112,13 +97,7 @@ pipeline {
                             -t http://auth-service:8080 \
                             -r zap_full_report.html \
                             -J zap_full_report.json \
-                            -I \
-                            -z "-config replacer.full_list(0).description=auth \
-                                -config replacer.full_list(0).enabled=true \
-                                -config replacer.full_list(0).matchtype=REQ_HEADER \
-                                -config replacer.full_list(0).matchstr=Authorization \
-                                -config replacer.full_list(0).regex=false \
-                                -config replacer.full_list(0).replacement=Bearer\\ ${token}"
+                            -I
                         """
                     }
                 }
