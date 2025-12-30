@@ -44,15 +44,15 @@ pipeline {
                             export EMAIL_AD="${EMAIL_AD}"
                             export EMAIL_PASS="${EMAIL_PASS}"
 
-                            # 1️⃣ Start only Postgres + discovery + gateway
-                            docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d postgres-db-ci discovery-service gateway-service --wait
+                            #  Start only Postgres + discovery + gateway
+                            docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d postgres-db discovery-service gateway-service --wait
 
-                            # 2️⃣ Ensure authdb exists
+                            #  Ensure authdb exists
                             echo "Creating authdb if it does not exist..."
-                            docker exec -i postgres-db-ci psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='authdb'" | grep -q 1 || \
-                            docker exec -i postgres-db-ci psql -U postgres -c "CREATE DATABASE authdb;"
+                            docker exec -i postgres-db psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='authdb'" | grep -q 1 || \
+                            docker exec -i postgres-db- psql -U postgres -c "CREATE DATABASE authdb;"
 
-                            # 3️⃣ Start auth-service after DB is ready
+                            # Start auth-service after DB is ready
                             docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d auth-service --wait
                         '''
                     }
