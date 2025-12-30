@@ -60,6 +60,29 @@ pipeline {
             }
         }
 
+        stage('Debug Environment') {
+            steps {
+                script {
+                    def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
+                    
+                    echo "=== Checking Running Containers ==="
+                    sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" ps'
+                    
+                    echo "=== Checking Networks ==="
+                    sh "docker network ls | grep ${COMPOSE_PROJECT_NAME} || echo 'Network not found'"
+                    
+                    echo "=== Checking auth-service logs ==="
+                    sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" logs auth-service || echo "No logs found"'
+                    
+                    echo "=== Testing connectivity from another container ==="
+                    sh """
+                        docker run --rm --network=${networkName} curlimages/curl:latest \
+                            curl -v --max-time 10 http://auth-service:8080/actuator/health || echo "Connection failed"
+                    """
+                }
+            }
+        }
+        
         stage('Verify Service is Up') {
             steps {
                 script {
@@ -68,7 +91,7 @@ pipeline {
                     echo "Waiting for auth-service to be ready..."
                     sh """
                         # Wait up to 60 seconds for service to respond
-                        for i in {1..12}; do
+                        for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
                             if docker run --rm --network=${networkName} curlimages/curl:latest \
                                 curl -s -o /dev/null -w "%{http_code}" http://auth-service:8080/actuator/health | grep -q "200"; then
                                 echo "✓ Auth service is ready!"
