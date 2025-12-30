@@ -88,21 +88,27 @@ pipeline {
                 script {
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     sh """
-                        echo "Checking logs to see why it failed..."
-                        docker logs auth-service --tail 50
-                        
-                        echo "Waiting for auth-service..."
-                        for i in {1..20}; do
-                            # We check for a 200 or 401 (since login might be protected)
+                        echo "=== Current App Logs ==="
+                        docker logs auth-service --tail 20
+
+                        echo "=== Starting Wait Loop ==="
+                        # Use a standard while loop for better compatibility
+                        i=1
+                        while [ \$i -le 20 ]; do
                             STATUS=\$(docker run --rm --network=${networkName} curlimages/curl:latest curl -s -o /dev/null -w "%{http_code}" http://auth-service:8080/v3/api-docs || echo "000")
                             
                             if [ "\$STATUS" -eq 200 ] || [ "\$STATUS" -eq 401 ]; then
-                                echo "✓ Service is up with status: \$STATUS"
+                                echo "✓ Service is up! (Status: \$STATUS)"
                                 exit 0
                             fi
-                            echo "Attempt \$i: Service returned \$STATUS. Waiting..."
+
+                            echo "Attempt \$i: Service returned \$STATUS. Waiting 5s..."
                             sleep 5
+                            i=\$((i+1))
                         done
+
+                        echo "✗ Timeout: Service did not start in time."
+                        docker logs auth-service
                         exit 1
                     """
                 }
