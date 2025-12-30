@@ -64,10 +64,10 @@ pipeline {
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
-                        --network=dast-auth_app-network \
-                        -v $(pwd)/zap-reports:/zap/wrk/:rw \
-                        ghcr.io/zaproxy/zaproxy:stable zap-api-scan.py \
-                        -t http://auth-service:8080/v3/api-docs -f openapi
+                            --network=dast-auth_app-network \
+                            -v $(pwd)/zap-reports:/zap/wrk/:rw \
+                            ghcr.io/zaproxy/zaproxy:stable zap-api-scan.py \
+                            -t http://auth-service:8080/v3/api-docs -f openapi
                         """
                     }
                     
