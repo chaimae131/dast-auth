@@ -99,22 +99,23 @@ pipeline {
             }
         }
 
+    
         stage('Run DAST Scans - Unauthenticated') {
             steps {
                 script {
                     def workspace = env.WORKSPACE
-                    // Clean and recreate local reports directory
-                    sh "rm -rf ${workspace}/zap-reports && mkdir -p ${workspace}/zap-reports"
+                    sh "mkdir -p ${workspace}/zap-reports"
 
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     def zapImage = "ghcr.io/zaproxy/zaproxy:stable"
 
                     // ================= API SCAN =================
-                    echo "=== Starting ZAP API Scan ==="
+                    echo "=== Starting ZAP API Scan (Manual Extraction) ==="
                     
-                    // Note: We REMOVED --rm so we can copy files out before the container is deleted
+                    // 1. Run ZAP without a volume. We name it so we can find it later.
+                    // We do NOT use --rm yet.
                     sh(script: """
-                        docker run --name zap_api_scan \
+                        docker run --name zap_api_scan_container \
                             --network=${networkName} \
                             ${zapImage} zap-api-scan.py \
                             -t http://auth-service:8080/v3/api-docs \
@@ -122,45 +123,22 @@ pipeline {
                             -r zap_api_report.html \
                             -J zap_api_report.json \
                             -I || true
-                        
-                        # Copy files from container to Jenkins workspace
-                        docker cp zap_api_scan:/zap/wrk/zap_api_report.html ${workspace}/zap-reports/
-                        docker cp zap_api_scan:/zap/wrk/zap_api_report.json ${workspace}/zap-reports/
-                        
-                        # Now remove the container
-                        docker rm zap_api_scan
                     """)
 
-                    // ================= FULL SCAN =================
-                    echo "=== Starting ZAP Full Scan ==="
-                    
-                    sh(script: """
-                        docker run --name zap_full_scan \
-                            --network=${networkName} \
-                            ${zapImage} zap-full-scan.py \
-                            -t http://auth-service:8080 \
-                            -r zap_full_report.html \
-                            -J zap_full_report.json \
-                            -I || true
+                    // 2. Extract the reports from the container's internal storage
+                    echo "Extracting reports from container..."
+                    sh """
+                        docker cp zap_api_scan_container:/zap/wrk/zap_api_report.html ${workspace}/zap-reports/ || echo "HTML not found"
+                        docker cp zap_api_scan_container:/zap/wrk/zap_api_report.json ${workspace}/zap-reports/ || echo "JSON not found"
                         
-                        # Copy files from container to Jenkins workspace
-                        docker cp zap_full_scan:/zap/wrk/zap_full_report.html ${workspace}/zap-reports/
-                        docker cp zap_full_scan:/zap/wrk/zap_full_report.json ${workspace}/zap-reports/
-                        
-                        # Now remove the container
-                        docker rm zap_full_scan
-                    """)
+                        # 3. Cleanup: Now we can delete the container
+                        docker rm zap_api_scan_container
+                    """
 
                     // ================= VERIFICATION =================
                     sh """
-                        echo "Final check for report files in: ${workspace}/zap-reports/"
+                        echo "Final Workspace Check:"
                         ls -lah ${workspace}/zap-reports/
-                        
-                        if [ -f "${workspace}/zap-reports/zap_api_report.html" ]; then
-                            echo "✓ API HTML report found!"
-                        else
-                            echo "✗ API HTML report STILL missing!"
-                        fi
                     """
                 }
             }
