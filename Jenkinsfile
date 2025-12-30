@@ -116,9 +116,7 @@ pipeline {
                     reportTitles: 'Full DAST Scan'
                 ])
 
-                // Teardown
-                sh 'docker compose -p "${COMPOSE_PROJECT_NAME}" down -v'
-                sh 'docker rmi "${IMAGE_NAME}" || true'
+                
             }
         }
     }
