@@ -74,6 +74,7 @@ pipeline {
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                         docker run --rm \
+                            --user \$(id -u):\$(id -g) \
                             --network=${networkName} \
                             -v \$(pwd)/zap-reports:/zap/wrk/:rw \
                             ${zapImage} zap-api-scan.py \
