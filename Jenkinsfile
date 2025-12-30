@@ -122,6 +122,7 @@ pipeline {
                     def apiScanStatus = sh(
                         script: """
                             docker run --rm \
+                                --user \$(id -u):\$(id -g) \
                                 --network=${networkName} \
                                 -v ${workspace}/zap-reports:/zap/wrk/:rw \
                                 ${zapImage} zap-api-scan.py \
@@ -160,6 +161,7 @@ pipeline {
                     def fullScanStatus = sh(
                         script: """
                             docker run --rm \
+                                --user \$(id -u):\$(id -g) \
                                 --network=${networkName} \
                                 -v ${workspace}/zap-reports:/zap/wrk/:rw \
                                 ${zapImage} zap-full-scan.py \
