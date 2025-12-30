@@ -109,13 +109,14 @@ pipeline {
                     def networkName = "${COMPOSE_PROJECT_NAME}_ci-network"
                     def zapImage = "ghcr.io/zaproxy/zaproxy:stable"
 
+                    // 1. Cleanup any old containers from failed runs
+                    sh "docker rm -f zap_api_scan zap_full_scan || true"
+
                     // ================= API SCAN =================
-                    echo "=== Starting ZAP API Scan (Manual Extraction) ==="
-                    
-                    // 1. Run ZAP without a volume. We name it so we can find it later.
-                    // We do NOT use --rm yet.
-                    sh(script: """
-                        docker run --name zap_api_scan_container \
+                    echo "=== Starting ZAP API Scan ==="
+                    // We remove -v and --rm. We use --name so we can find it.
+                    sh """
+                        docker run --name zap_api_scan \
                             --network=${networkName} \
                             ${zapImage} zap-api-scan.py \
                             -t http://auth-service:8080/v3/api-docs \
@@ -123,21 +124,38 @@ pipeline {
                             -r zap_api_report.html \
                             -J zap_api_report.json \
                             -I || true
-                    """)
+                    """
 
-                    // 2. Extract the reports from the container's internal storage
-                    echo "Extracting reports from container..."
+                    // Pull the files out of the container before it's deleted
+                    echo "Extracting API reports..."
                     sh """
-                        docker cp zap_api_scan_container:/zap/wrk/zap_api_report.html ${workspace}/zap-reports/ || echo "HTML not found"
-                        docker cp zap_api_scan_container:/zap/wrk/zap_api_report.json ${workspace}/zap-reports/ || echo "JSON not found"
-                        
-                        # 3. Cleanup: Now we can delete the container
-                        docker rm zap_api_scan_container
+                        docker cp zap_api_scan:/zap/wrk/zap_api_report.html ${workspace}/zap-reports/ || echo "HTML missing"
+                        docker cp zap_api_scan:/zap/wrk/zap_api_report.json ${workspace}/zap-reports/ || echo "JSON missing"
+                        docker rm -f zap_api_scan
+                    """
+
+                    // ================= FULL SCAN =================
+                    echo "=== Starting ZAP Full Scan ==="
+                    sh """
+                        docker run --name zap_full_scan \
+                            --network=${networkName} \
+                            ${zapImage} zap-full-scan.py \
+                            -t http://auth-service:8080 \
+                            -r zap_full_report.html \
+                            -J zap_full_report.json \
+                            -I || true
+                    """
+
+                    echo "Extracting Full reports..."
+                    sh """
+                        docker cp zap_full_scan:/zap/wrk/zap_full_report.html ${workspace}/zap-reports/ || echo "Full HTML missing"
+                        docker cp zap_full_scan:/zap/wrk/zap_full_report.json ${workspace}/zap-reports/ || echo "Full JSON missing"
+                        docker rm -f zap_full_scan
                     """
 
                     // ================= VERIFICATION =================
                     sh """
-                        echo "Final Workspace Check:"
+                        echo "Checking workspace for extracted files:"
                         ls -lah ${workspace}/zap-reports/
                     """
                 }
