@@ -125,7 +125,7 @@ pipeline {
                         # Copy the files out manually
                         docker cp zap_api_scan:/zap/wrk/zap_api_report.html ./zap-reports/ || echo "HTML failed"
                         docker cp zap_api_scan:/zap/wrk/zap_api_report.json ./zap-reports/ || echo "JSON failed"
-                        docker rm -f zap_api_scan
+                        # docker rm -f zap_api_scan
                     """
 
                     // ================= FULL SCAN =================
